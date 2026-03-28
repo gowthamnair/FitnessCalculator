@@ -47,16 +47,16 @@
             <span id="metric-progress" class="text-2xl font-bold text-green-400">0%</span>
         </div>
         <div class="glass-panel p-4 flex flex-col justify-center items-center text-center col-span-2">
-            <span class="text-xs text-gray-400 uppercase tracking-wider mb-1">7-Day Deficit / Goal</span>
-            <span id="metric-weekly-deficit" class="text-2xl font-bold text-blue-400">0 / 0 kcal</span>
+            <span class="text-xs text-gray-400 uppercase tracking-wider mb-1">Current BMR</span>
+            <span id="metric-bmr" class="text-2xl font-bold text-blue-400">0 kcal/day</span>
         </div>
         <div class="glass-panel p-4 flex flex-col justify-center items-center text-center">
-            <span class="text-xs text-gray-400 uppercase tracking-wider mb-1">Net Cals (Today)</span>
-            <span id="metric-net-cals" class="text-xl font-bold">0 kcal</span>
+            <span class="text-xs text-gray-400 uppercase tracking-wider mb-1">Weekly Burn Target Left</span>
+            <span id="metric-weekly-left" class="text-xl font-bold">0 kcal</span>
         </div>
         <div class="glass-panel p-4 flex flex-col justify-center items-center text-center">
-            <span class="text-xs text-gray-400 uppercase tracking-wider mb-1">Total to Burn</span>
-            <span id="metric-total-burn" class="text-xl font-bold">0 kcal</span>
+            <span class="text-xs text-gray-400 uppercase tracking-wider mb-1">Last 3 Days Intake</span>
+            <span id="metric-last-3" class="text-lg font-bold">0 / 0 / 0</span>
         </div>
         <div class="glass-panel p-4 flex flex-col justify-center items-center text-center col-span-2">
             <span class="text-xs text-gray-400 uppercase tracking-wider mb-1">Days Remaining</span>
@@ -220,7 +220,10 @@
             percent = Math.max(0, Math.min(100, percent));
             document.getElementById('metric-progress').innerText = `${percent.toFixed(1)}%`;
 
-            // 3. Weekly Deficit & Goal
+            // 3. Current BMR
+            document.getElementById('metric-bmr').innerText = `${Math.round(bmr)} kcal/day`;
+
+            // 4. Weekly Calories Left to Burn (Target Deficit - Achieved Deficit)
             const msInDay = 24 * 60 * 60 * 1000;
             const now = new Date();
             let weeklyDeficit = 0;
@@ -235,20 +238,18 @@
             const totalCalsToBurn = totalToLose * calsPerKgFat;
             const targetDailyDeficit = totalCalsToBurn / config.timeframe;
             const targetWeeklyDeficit = targetDailyDeficit * 7;
+            
+            const weeklyLeftToBurn = Math.max(0, targetWeeklyDeficit - weeklyDeficit);
+            document.getElementById('metric-weekly-left').innerText = `${Math.round(weeklyLeftToBurn)} kcal`;
 
-            document.getElementById('metric-weekly-deficit').innerText = `${Math.round(weeklyDeficit)} / ${Math.round(targetWeeklyDeficit)} kcal`;
-
-            // 4. Net Calories
-            let netCals = 0;
+            // 5. Last 3 Days Intake
+            let last3Str = "- / - / -";
             if (logs.length > 0) {
-                const lastLog = logs[logs.length - 1];
-                netCals = lastLog.calsIn - bmr - lastLog.calsOut;
+                const last3Logs = logs.slice(-3).map(l => l.calsIn);
+                while (last3Logs.length < 3) last3Logs.unshift('-'); 
+                last3Str = last3Logs.join(' / ');
             }
-            document.getElementById('metric-net-cals').innerText = `${Math.round(netCals)} kcal`;
-
-            // 5. Calories to Burn
-            const remainingCalsToBurn = (currentWeight - config.goalWeight) * calsPerKgFat;
-            document.getElementById('metric-total-burn').innerText = remainingCalsToBurn > 0 ? `${Math.round(remainingCalsToBurn)} kcal` : '0 kcal';
+            document.getElementById('metric-last-3').innerText = last3Str;
 
             // 6. Days to go
             const start = new Date(startDate);
