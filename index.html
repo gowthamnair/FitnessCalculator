@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Fitness Tracker</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script>
         tailwind.config = {
             darkMode: 'class',
@@ -41,13 +42,13 @@
             <span class="text-xs text-gray-400 uppercase tracking-wider mb-1">To Lose</span>
             <span id="metric-countdown" class="text-2xl font-bold">0 kg</span>
         </div>
-        <div class="glass-panel p-4 flex flex-col justify-center items-center text-center">
-            <span class="text-xs text-gray-400 uppercase tracking-wider mb-1">Progress</span>
+        <div onclick="openChartModal()" class="glass-panel p-4 flex flex-col justify-center items-center text-center cursor-pointer hover:bg-white hover:bg-opacity-10 transition">
+            <span class="text-xs text-gray-400 uppercase tracking-wider mb-1">Progress 📊</span>
             <span id="metric-progress" class="text-2xl font-bold text-green-400">0%</span>
         </div>
         <div class="glass-panel p-4 flex flex-col justify-center items-center text-center col-span-2">
-            <span class="text-xs text-gray-400 uppercase tracking-wider mb-1">7-Day Deficit</span>
-            <span id="metric-weekly-deficit" class="text-3xl font-bold text-blue-400">0 kcal</span>
+            <span class="text-xs text-gray-400 uppercase tracking-wider mb-1">7-Day Deficit / Goal</span>
+            <span id="metric-weekly-deficit" class="text-2xl font-bold text-blue-400">0 / 0 kcal</span>
         </div>
         <div class="glass-panel p-4 flex flex-col justify-center items-center text-center">
             <span class="text-xs text-gray-400 uppercase tracking-wider mb-1">Net Cals (Today)</span>
@@ -70,7 +71,7 @@
     </div>
 
     <div id="setup-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black bg-opacity-60 backdrop-blur-sm">
-        <div class="glass-panel w-full max-w-md p-6 relative">
+        <div class="glass-panel w-full max-w-md p-6 relative max-h-[90vh] overflow-y-auto">
             <button onclick="closeSettingsIfConfigured()" class="absolute top-4 right-4 text-gray-400 font-bold" id="close-setup-btn">✕</button>
             <h2 class="text-xl font-semibold mb-4 border-b border-gray-700 pb-2">User Configuration</h2>
             <form id="setup-form" class="space-y-4">
@@ -103,7 +104,8 @@
                     <label class="block text-xs text-gray-400 mb-1">Timeframe (Days)</label>
                     <input type="number" id="setup-timeframe" required class="w-full bg-black bg-opacity-50 border border-gray-600 rounded p-2 text-white">
                 </div>
-                <button type="submit" class="w-full bg-blue-600 text-white rounded p-3 font-semibold mt-4">Save Configuration</button>
+                <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white rounded p-3 font-semibold mt-4 transition">Save Configuration</button>
+                <button type="button" onclick="resetApp()" class="w-full bg-red-600 hover:bg-red-700 text-white rounded p-3 font-semibold mt-2 transition">Reset All Data</button>
             </form>
         </div>
     </div>
@@ -125,23 +127,31 @@
                     <label class="block text-xs text-gray-400 mb-1">Active Calories Burnt (Exc. BMR)</label>
                     <input type="number" id="log-cal-out" required class="w-full bg-black bg-opacity-50 border border-gray-600 rounded p-2 text-white">
                 </div>
-                <button type="submit" class="w-full bg-green-600 text-white rounded p-3 font-semibold mt-4">Save Log</button>
+                <button type="submit" class="w-full bg-green-600 hover:bg-green-700 text-white rounded p-3 font-semibold mt-4 transition">Save Log</button>
             </form>
+        </div>
+    </div>
+
+    <div id="chart-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black bg-opacity-60 backdrop-blur-sm">
+        <div class="glass-panel w-full max-w-lg p-6 relative">
+            <button onclick="closeChartModal()" class="absolute top-4 right-4 text-gray-400 font-bold">✕</button>
+            <h2 class="text-xl font-semibold mb-4 border-b border-gray-700 pb-2">Weight Progress</h2>
+            <canvas id="progressChart" width="400" height="300"></canvas>
         </div>
     </div>
 
     <script>
         const STORAGE_KEY = 'fitness_app_data';
         let appData = JSON.parse(localStorage.getItem(STORAGE_KEY)) || { config: null, logs: [], startDate: null };
+        let chartInstance = null;
 
-        // DOM Elements
         const elDashboard = document.getElementById('dashboard');
         const elSetupModal = document.getElementById('setup-modal');
         const elLogModal = document.getElementById('log-modal');
+        const elChartModal = document.getElementById('chart-modal');
         const elCloseSetupBtn = document.getElementById('close-setup-btn');
         const elFab = document.getElementById('fab-container');
 
-        // Initialize App
         function init() {
             if (!appData.config) {
                 elCloseSetupBtn.classList.add('hidden');
@@ -155,7 +165,6 @@
             }
         }
 
-        // Setup Form Submit
         document.getElementById('setup-form').addEventListener('submit', function(e) {
             e.preventDefault();
             appData.config = {
@@ -171,7 +180,6 @@
             init();
         });
 
-        // Log Form Submit
         document.getElementById('log-form').addEventListener('submit', function(e) {
             e.preventDefault();
             const today = new Date().toISOString().split('T')[0];
@@ -182,7 +190,6 @@
                 calsOut: parseInt(document.getElementById('log-cal-out').value)
             };
             
-            // Overwrite if log exists for today
             const existingIndex = appData.logs.findIndex(l => l.date === today);
             if (existingIndex > -1) appData.logs[existingIndex] = newLog;
             else appData.logs.push(newLog);
@@ -192,9 +199,7 @@
             updateDashboard();
         });
 
-        // Calculations & UI Updates
         function calculateBMR(weight, height, age, gender) {
-            // Mifflin-St Jeor Equation
             let bmr = (10 * weight) + (6.25 * height) - (5 * age);
             return gender === 'm' ? bmr + 5 : bmr - 161;
         }
@@ -206,7 +211,7 @@
             
             // 1. Countdown to weight loss
             const weightToLose = (currentWeight - config.goalWeight).toFixed(1);
-            document.getElementById('metric-countdown').innerText = weightToLose > 0 ? `${weightToLose} kg` : 'Goal Reached!';
+            document.getElementById('metric-countdown').innerText = weightToLose > 0 ? `${weightToLose} kg` : 'Goal!';
 
             // 2. % of Goal Achieved
             const totalToLose = config.startWeight - config.goalWeight;
@@ -215,7 +220,7 @@
             percent = Math.max(0, Math.min(100, percent));
             document.getElementById('metric-progress').innerText = `${percent.toFixed(1)}%`;
 
-            // 3. Weekly Deficit
+            // 3. Weekly Deficit & Goal
             const msInDay = 24 * 60 * 60 * 1000;
             const now = new Date();
             let weeklyDeficit = 0;
@@ -226,9 +231,14 @@
                     weeklyDeficit += dailyDeficit;
                 }
             });
-            document.getElementById('metric-weekly-deficit').innerText = `${Math.round(weeklyDeficit)} kcal`;
+            const calsPerKgFat = 7700;
+            const totalCalsToBurn = totalToLose * calsPerKgFat;
+            const targetDailyDeficit = totalCalsToBurn / config.timeframe;
+            const targetWeeklyDeficit = targetDailyDeficit * 7;
 
-            // 4. Net Calories (Consumed - BMR - Activity) for latest log
+            document.getElementById('metric-weekly-deficit').innerText = `${Math.round(weeklyDeficit)} / ${Math.round(targetWeeklyDeficit)} kcal`;
+
+            // 4. Net Calories
             let netCals = 0;
             if (logs.length > 0) {
                 const lastLog = logs[logs.length - 1];
@@ -237,9 +247,8 @@
             document.getElementById('metric-net-cals').innerText = `${Math.round(netCals)} kcal`;
 
             // 5. Calories to Burn
-            const calsPerKgFat = 7700;
-            const totalCalsToBurn = (currentWeight - config.goalWeight) * calsPerKgFat;
-            document.getElementById('metric-total-burn').innerText = totalCalsToBurn > 0 ? `${Math.round(totalCalsToBurn)} kcal` : '0 kcal';
+            const remainingCalsToBurn = (currentWeight - config.goalWeight) * calsPerKgFat;
+            document.getElementById('metric-total-burn').innerText = remainingCalsToBurn > 0 ? `${Math.round(remainingCalsToBurn)} kcal` : '0 kcal';
 
             // 6. Days to go
             const start = new Date(startDate);
@@ -248,7 +257,7 @@
             document.getElementById('metric-days-left').innerText = Math.max(0, daysLeft);
         }
 
-        // Utility Functions
+        // Modal Controls
         function toggleSettings() {
             if (appData.config) {
                 document.getElementById('setup-weight').value = appData.config.startWeight;
@@ -277,11 +286,68 @@
             elLogModal.classList.toggle('hidden');
         }
 
+        function openChartModal() {
+            elChartModal.classList.remove('hidden');
+            const ctx = document.getElementById('progressChart').getContext('2d');
+            
+            const labels = ['Start', ...appData.logs.map(l => l.date.substring(5))]; // MM-DD format
+            const dataPoints = [appData.config.startWeight, ...appData.logs.map(l => l.weight)];
+            const goalPoints = Array(labels.length).fill(appData.config.goalWeight);
+
+            if (chartInstance) chartInstance.destroy();
+            
+            Chart.defaults.color = 'rgba(255, 255, 255, 0.7)';
+            Chart.defaults.borderColor = 'rgba(255, 255, 255, 0.1)';
+
+            chartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Weight (kg)',
+                            data: dataPoints,
+                            borderColor: '#3b82f6',
+                            backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                            tension: 0.3,
+                            fill: true
+                        },
+                        {
+                            label: 'Goal',
+                            data: goalPoints,
+                            borderColor: '#22c55e',
+                            borderDash: [5, 5],
+                            pointRadius: 0,
+                            fill: false
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        y: {
+                            min: Math.min(appData.config.goalWeight - 2, ...dataPoints)
+                        }
+                    }
+                }
+            });
+        }
+
+        function closeChartModal() {
+            elChartModal.classList.add('hidden');
+        }
+
+        function resetApp() {
+            if (confirm("Are you sure you want to delete all data? This cannot be undone.")) {
+                localStorage.removeItem(STORAGE_KEY);
+                location.reload();
+            }
+        }
+
         function saveData() {
             localStorage.setItem(STORAGE_KEY, JSON.stringify(appData));
         }
 
-        // Run
         init();
     </script>
 </body>
